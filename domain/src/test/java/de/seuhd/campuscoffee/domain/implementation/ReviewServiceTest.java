@@ -20,11 +20,9 @@ import java.util.List;
 import java.util.Objects;
 
 import static de.seuhd.campuscoffee.domain.tests.TestFixtures.getApprovalConfiguration;
+import static de.seuhd.campuscoffee.domain.tests.TestFixtures.getUserFixtures;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
@@ -172,5 +170,62 @@ public class ReviewServiceTest {
         
         // then
         assertTrue(updatedReview.approved());
+    }
+
+    @Test
+    void testUpdateApprovalStatusForReviewWithInsufficientApprovals() {
+        // given
+        Review unapprovedReview = TestFixtures.getReviewFixtures().getFirst().toBuilder()
+                .approvalCount(0)
+                .approved(false)
+                .build();
+        assertNotNull(unapprovedReview.getId());
+        when(reviewDataService.getById(unapprovedReview.getId())).thenReturn(unapprovedReview);
+
+        User user = TestFixtures.getUserFixtures().getLast();
+        assertNotNull(user.getId());
+        assertNotEquals(user.getId(), unapprovedReview.author().getId());
+        when(userDataService.getById(user.getId())).thenReturn(user);
+        when(reviewDataService.upsert(any(Review.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        // when
+        Review updatedReview = reviewService.approve(unapprovedReview, user.getId());
+
+        // then
+        assertFalse(updatedReview.approved());
+        assertThat(updatedReview.approvalCount()).isEqualTo(1);
+
+        // when
+        Review approvedReview = unapprovedReview.toBuilder()
+                .approvalCount(approvalConfiguration.minCount())
+                .build();
+
+        // when
+        updatedReview = reviewService.updateApprovalStatus(approvedReview);
+
+        // then
+        assertTrue(updatedReview.approved());
+    }
+
+    @Test
+    void upsertReviewSuccessfully() {
+        // given
+        Review review = TestFixtures.getReviewFixtures().getFirst();
+        Pos pos = review.pos();
+        User author = review.author();
+        assertNotNull(pos.getId());
+
+        when(posDataService.getById(pos.getId())).thenReturn(pos);
+        when(reviewDataService.filter(pos, author)).thenReturn(List.of()); // empty list = no existing review
+        when(reviewDataService.upsert(review)).thenReturn(review);
+
+        // when
+        Review createdReview = reviewService.upsert(review);
+
+        // then
+        verify(posDataService).getById(pos.getId());
+        verify(reviewDataService).filter(pos, author);
+        verify(reviewDataService).upsert(review);
+        assertThat(createdReview).isEqualTo(review);
     }
 }
